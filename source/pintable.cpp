@@ -579,14 +579,14 @@ STDMETHODIMP ScriptGlobalTable::get_SystemTime(long *pVal)
 /*STDMETHODIMP ScriptGlobalTable::put_NightDay(int pVal)
 {
 if(g_pplayer)
-g_pplayer->m_globalEmissionScale = dequantizeSignedPercent(newVal);
+g_pplayer->m_globalEmissionScale = dequantizeUnsignedPercent(newVal);
 return S_OK;
 }*/
 
 STDMETHODIMP ScriptGlobalTable::get_NightDay(int *pVal)
 {
    if (g_pplayer)
-      *pVal = quantizeSignedPercent(g_pplayer->m_globalEmissionScale);
+      *pVal = quantizeUnsignedPercent(g_pplayer->m_globalEmissionScale);
    return S_OK;
 }
 
@@ -1362,7 +1362,7 @@ PinTable::PinTable()
    m_globalDifficulty = 0.2f;			// easy by default
    hr = GetRegInt("Player", "GlobalDifficulty", &tmp);
    if (hr == S_OK)
-      m_globalDifficulty = dequantizeSignedPercent(tmp);
+      m_globalDifficulty = dequantizeUnsignedPercent(tmp);
 
    int accel;
    hr = GetRegInt("Player", "PBWEnabled", &accel); // true if electronic accelerometer enabled
@@ -1389,12 +1389,12 @@ PinTable::PinTable()
    m_tblAccelAmpX = 1.5f;
    hr = GetRegInt("Player", "PBWAccelGainX", &tmp);
    if (hr == S_OK)
-      m_tblAccelAmpX = dequantizeSignedPercent(tmp);
+      m_tblAccelAmpX = dequantizeUnsignedPercentNoClamp(tmp);
 
    m_tblAccelAmpY = 1.5f;
    hr = GetRegInt("Player", "PBWAccelGainY", &tmp);
    if (hr == S_OK)
-      m_tblAccelAmpY = dequantizeSignedPercent(tmp);
+      m_tblAccelAmpY = dequantizeUnsignedPercentNoClamp(tmp);
 
    m_tblAccelMaxX = JOYRANGEMX;
    hr = GetRegInt("Player", "PBWAccelMaxX", &tmp);
@@ -3577,12 +3577,12 @@ HRESULT PinTable::SaveData(IStream* pstm, HCRYPTHASH hcrypthash, HCRYPTKEY hcryp
          mats[i].fWrapLighting = m->m_fWrapLighting;
          mats[i].fRoughness = m->m_fRoughness;
          mats[i].fGlossyImageLerp = 255 - quantizeUnsigned<8>(clamp(m->m_fGlossyImageLerp, 0.f, 1.f)); // '255 -' to be compatible with previous table versions
+         mats[i].fThickness = quantizeUnsigned<8>(clamp(m->m_fThickness, 0.05f, 1.f)); // clamp with 0.05f to be compatible with previous table versions
          mats[i].fEdge = m->m_fEdge;
          mats[i].fOpacity = m->m_fOpacity;
          mats[i].bIsMetal = m->m_bIsMetal;
          mats[i].bOpacityActive_fEdgeAlpha = m->m_bOpacityActive ? 1 : 0;
          mats[i].bOpacityActive_fEdgeAlpha |= quantizeUnsigned<7>(clamp(m->m_fEdgeAlpha, 0.f, 1.f)) << 1;
-         mats[i].bUnused2 = 0;
          strcpy_s(mats[i].szName, m->m_szName);
       }
       bw.WriteStruct(FID(MATE), mats, (int)sizeof(SaveMaterial)*m_materials.Size());
@@ -3939,6 +3939,10 @@ HRESULT PinTable::LoadGameFromStorage(IStorage *pstgRoot)
          if (loadfileversion < 1030) // the m_fGlossyImageLerp part was included first with 10.3, so set all previously saved materials to the old default
              for (int i = 0; i < m_materials.size(); ++i)
                  m_materials.ElementAt(i)->m_fGlossyImageLerp = 1.f;
+
+         if (loadfileversion < 1040) // the m_fThickness part was included first with 10.4, so set all previously saved materials to the old default
+             for (int i = 0; i < m_materials.size(); ++i)
+                 m_materials.ElementAt(i)->m_fThickness = 0.05f;
 
          //////// End Authentication block
       }
@@ -4478,7 +4482,7 @@ BOOL PinTable::LoadToken(int id, BiffReader *pbr)
       pbr->GetFloat(&m_globalDifficulty);
       int tmp;
       HRESULT hr = GetRegInt("Player", "GlobalDifficulty", &tmp);
-      if (hr == S_OK) m_globalDifficulty = dequantizeSignedPercent(tmp);
+      if (hr == S_OK) m_globalDifficulty = dequantizeUnsignedPercent(tmp);
    }
    else if (id == FID(CUST))
    {
@@ -4547,6 +4551,7 @@ BOOL PinTable::LoadToken(int id, BiffReader *pbr)
          pmat->m_fWrapLighting = mats[i].fWrapLighting;
          pmat->m_fRoughness = mats[i].fRoughness;
          pmat->m_fGlossyImageLerp = 1.0f - dequantizeUnsigned<8>(mats[i].fGlossyImageLerp); //!! '1.0f -' to be compatible with previous table versions
+         pmat->m_fThickness = (mats[i].fThickness == 0) ? 0.05f : dequantizeUnsigned<8>(mats[i].fThickness); //!! 0 -> 0.05f to be compatible with previous table versions
          pmat->m_fEdge = mats[i].fEdge;
          pmat->m_fOpacity = mats[i].fOpacity;
          pmat->m_bIsMetal = mats[i].bIsMetal;
@@ -8299,6 +8304,7 @@ void PinTable::AddDbgMaterial(Material *pmat)
       dbgChangedMaterials[i]->m_fOpacity = pmat->m_fOpacity;
       dbgChangedMaterials[i]->m_fRoughness = pmat->m_fRoughness;
       dbgChangedMaterials[i]->m_fGlossyImageLerp = pmat->m_fGlossyImageLerp;
+      dbgChangedMaterials[i]->m_fThickness = pmat->m_fThickness;
       dbgChangedMaterials[i]->m_fWrapLighting = pmat->m_fWrapLighting;
    }
    else
@@ -8314,6 +8320,7 @@ void PinTable::AddDbgMaterial(Material *pmat)
       newMat->m_fOpacity = pmat->m_fOpacity;
       newMat->m_fRoughness = pmat->m_fRoughness;
       newMat->m_fGlossyImageLerp = pmat->m_fGlossyImageLerp;
+      newMat->m_fThickness = pmat->m_fThickness;
       newMat->m_fWrapLighting = pmat->m_fWrapLighting;
       strcpy_s(newMat->m_szName, pmat->m_szName);
       dbgChangedMaterials.push_back(newMat);
@@ -8341,6 +8348,7 @@ void PinTable::UpdateDbgMaterial(void)
             mat->m_fOpacity = pmat->m_fOpacity;
             mat->m_fRoughness = pmat->m_fRoughness;
             mat->m_fGlossyImageLerp = pmat->m_fGlossyImageLerp;
+            mat->m_fThickness = pmat->m_fThickness;
             mat->m_fWrapLighting = pmat->m_fWrapLighting;
             somethingChanged = true;
             break;
@@ -9297,7 +9305,7 @@ STDMETHODIMP PinTable::put_LightEmissionScale(float newVal)
 
 STDMETHODIMP PinTable::get_NightDay(int *pVal)
 {
-   *pVal = quantizeSignedPercent(m_globalEmissionScale);
+   *pVal = quantizeUnsignedPercent(m_globalEmissionScale);
 
    return S_OK;
 }
@@ -9306,7 +9314,7 @@ STDMETHODIMP PinTable::put_NightDay(int newVal)
 {
    STARTUNDO
 
-   m_globalEmissionScale = dequantizeSignedPercent(newVal);
+   m_globalEmissionScale = dequantizeUnsignedPercent(newVal);
 
    STOPUNDO
 
@@ -9369,7 +9377,7 @@ STDMETHODIMP PinTable::put_BallReflection(UserDefaultOnOff newVal)
 
 STDMETHODIMP PinTable::get_PlayfieldReflectionStrength(int *pVal)
 {
-   *pVal = quantizeSignedPercent(m_playfieldReflectionStrength);
+   *pVal = quantizeUnsignedPercent(m_playfieldReflectionStrength);
 
    return S_OK;
 }
@@ -9378,7 +9386,7 @@ STDMETHODIMP PinTable::put_PlayfieldReflectionStrength(int newVal)
 {
    STARTUNDO
 
-   m_playfieldReflectionStrength = dequantizeSignedPercent(newVal);
+   m_playfieldReflectionStrength = dequantizeUnsignedPercent(newVal);
 
    STOPUNDO
 
@@ -9405,7 +9413,7 @@ STDMETHODIMP PinTable::put_BallTrail(UserDefaultOnOff newVal)
 
 STDMETHODIMP PinTable::get_TrailStrength(int *pVal)
 {
-   *pVal = quantizeSignedPercent(m_ballTrailStrength);
+   *pVal = quantizeUnsignedPercent(m_ballTrailStrength);
 
    return S_OK;
 }
@@ -9414,7 +9422,7 @@ STDMETHODIMP PinTable::put_TrailStrength(int newVal)
 {
    STARTUNDO
 
-   m_ballTrailStrength = dequantizeSignedPercent(newVal);
+   m_ballTrailStrength = dequantizeUnsignedPercent(newVal);
 
    STOPUNDO
 
@@ -9477,7 +9485,7 @@ STDMETHODIMP PinTable::put_BloomStrength(float newVal)
 
 STDMETHODIMP PinTable::get_TableSoundVolume(int *pVal)
 {
-   *pVal = quantizeSignedPercent(m_TableSoundVolume);
+   *pVal = quantizeUnsignedPercent(m_TableSoundVolume);
 
    return S_OK;
 }
@@ -9486,7 +9494,7 @@ STDMETHODIMP PinTable::put_TableSoundVolume(int newVal)
 {
    STARTUNDO
 
-   m_TableSoundVolume = dequantizeSignedPercent(newVal);
+   m_TableSoundVolume = dequantizeUnsignedPercent(newVal);
 
    STOPUNDO
 
@@ -9599,7 +9607,7 @@ STDMETHODIMP PinTable::put_BallDecalMode(VARIANT_BOOL newVal)
 
 STDMETHODIMP PinTable::get_TableMusicVolume(int *pVal)
 {
-   *pVal = quantizeSignedPercent(m_TableMusicVolume);
+   *pVal = quantizeUnsignedPercent(m_TableMusicVolume);
 
    return S_OK;
 }
@@ -9608,7 +9616,7 @@ STDMETHODIMP PinTable::put_TableMusicVolume(int newVal)
 {
    STARTUNDO
 
-   m_TableMusicVolume = dequantizeSignedPercent(newVal);
+   m_TableMusicVolume = dequantizeUnsignedPercent(newVal);
 
    STOPUNDO
 

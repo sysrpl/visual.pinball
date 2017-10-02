@@ -385,6 +385,9 @@ BOOL CALLBACK EnumChildInitList(HWND hwnd, LPARAM lParam)
 {
    SmartBrowser *const psb = (SmartBrowser *)lParam;
 
+   if (psb == NULL)
+      return FALSE;
+
    char szName[256];
    GetClassName(hwnd, szName, 256);
 
@@ -404,6 +407,9 @@ BOOL CALLBACK EnumChildInitList(HWND hwnd, LPARAM lParam)
       CADWORD        cadw;
       IPerPropertyBrowsing *pippb;
       char szT[512];
+
+      if (psb->GetBaseIDisp() == NULL)
+         return FALSE;
 
       psb->GetBaseIDisp()->QueryInterface(IID_IPerPropertyBrowsing, (void **)&pippb);
 
@@ -910,7 +916,7 @@ void SmartBrowser::RelayoutExpandos()
    {
       HWND hwndExpand = m_vhwndExpand[i];
       ExpandoInfo *pexinfo = (ExpandoInfo *)GetWindowLongPtr(hwndExpand, GWLP_USERDATA);
-      if (pexinfo->m_fExpanded)
+      if (pexinfo && pexinfo->m_fExpanded)
          totalheight += pexinfo->m_dialogheight;
       totalheight += EXPANDOHEIGHT;
    }
